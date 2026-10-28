@@ -2,7 +2,7 @@
 <html lang="uz"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Rus tili o‘yini</title>
-<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>
 :root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);--bg:#fff;--tx:#3c3c3c;--mut:#777;--bd:#e5e5e5;--g:#58cc02;--gd:#46a302;--b:#1cb0f6;--bd2:#1899d6;--r:#ff4b4b;--rl:#ffdfe0;--gl:#d7ffb8;--sel:#ddf4ff;color-scheme:light}
 html{scroll-padding-top:env(safe-area-inset-top,0px);height:100%}
@@ -128,25 +128,28 @@ function speak(txt,r=.85){
 const say=k=>speak(D[k].ru,.8);
 const sayT=t=>speak(t,.85);
 // "Boshlash" bosilganda chaqiriladi: brauzer ovozni ochadi
-async function initAudio(){
-  try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();await ac.resume()}catch(e){err("AudioContext ochilmadi: "+e.message,e)}
+function initAudio(){
+  try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();ac.resume()}catch(e){err("AudioContext ochilmadi: "+e.message,e)}
   snd(660,.08);
   try{if("speechSynthesis"in window){const u=new SpeechSynthesisUtterance(" ");u.volume=0;speechSynthesis.speak(u)}}catch(e){}
-  try{AU.src=SIL;const p=AU.play();if(p&&p.catch)await p.catch(()=>{})}catch(e){}
-  await loadVoices();
+  try{AU.src=SIL;const p=AU.play();if(p&&p.catch)p.catch(()=>{})}catch(e){}
+  voice=pickVoice();
 }
 
+if("speechSynthesis"in window){try{speechSynthesis.getVoices();speechSynthesis.onvoiceschanged=()=>{voice=voice||pickVoice()}}catch(e){}}
 /* ---------- Boshlash ekrani ---------- */
 function splash(){
-  $("#app").innerHTML=`<div class="end"><div class="e">🦉</div><h1 style="color:var(--g)">Rus tili o‘yini</h1><p id="stt" style="padding:0 24px">Ovoz bilan o‘rganish uchun “Boshlash” tugmasini bosing.</p><div class="bd"><button class="btn" id="go0">Boshlash</button></div></div>`;
+  $("#app").innerHTML=`<div class="end"><div class="e">🦉</div><h1 style="color:var(--g)">Rus tili o‘yini</h1><p id="stt" style="padding:0 24px">“Boshlash” tugmasini bosing, men sizga “Привет!” deyman.</p><div class="bd"><button class="btn" id="go0">Boshlash</button></div></div>`;
   const b=$("#go0");
-  b.onclick=async()=>{
-    b.disabled=true;b.textContent="Ovoz yuklanmoqda…";
-    $("#stt").textContent="Rus ovozi qidirilmoqda…";
-    await initAudio();
-    if(voice)note("✔ Rus ovozi tayyor: "+voice.name,3000);
-    else note("Telefonda rus ovozi yo‘q. Google ovoziga o‘tildi, internet kerak.",6000);
+  b.onclick=()=>{
+    if(b.dataset.on)return;b.dataset.on="1";
+    initAudio();
+    speak("Привет!",.9);
     home();
+    loadVoices().then(()=>{
+      if(voice)note("✔ Rus ovozi tayyor: "+voice.name,3000);
+      else note("Telefonda rus ovozi yo‘q. Google ovoziga o‘tildi, internet kerak.",6000);
+    });
   };
 }
 
