@@ -50,7 +50,8 @@ body{margin:0;height:100%;background:var(--bg);color:var(--tx);font-family:Nunit
 @keyframes fall{to{transform:translateY(110vh) rotate(360deg)}}
 .m{display:flex;gap:8px;margin:12px 0;align-items:flex-end}.m.u{justify-content:flex-end}.mb{max-width:80%;padding:10px 14px;border:2px solid var(--bd);border-radius:18px;font-size:18px}.m.u .mb{background:var(--b);border-color:var(--bd2);color:#fff}.mb small{font-weight:700;opacity:.75;font-size:14px}.av{font-size:34px}.mic{width:84px;height:84px;border-radius:50%;border:0;border-bottom:6px solid var(--bd2);background:var(--b);color:#fff;font-size:38px;cursor:pointer}.mg{margin-top:12px;color:var(--mut);min-height:44px}.btn.sk{background:var(--bd);border-bottom-color:#c4c4c4;color:var(--mut)}.op small{display:block;font-weight:700;color:var(--mut);font-size:14px}
 .rv{display:block;width:calc(100% - 32px);margin:12px 16px 0;padding:14px 16px;border:2px solid #ce82ff;border-bottom-width:5px;border-radius:16px;background:var(--bg);color:var(--tx);font:inherit;font-size:18px;text-align:left;cursor:pointer}.rv small{color:var(--mut);font-weight:700;font-size:14px}.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.gr{padding:12px 4px;border:2px solid;border-bottom-width:5px;border-radius:14px;background:var(--bg);font:inherit;font-weight:900;font-size:15px;cursor:pointer}.gr.r{border-color:var(--r);color:var(--r)}.gr.y{border-color:#ff9600;color:#ff9600}.gr.g{border-color:var(--g);color:var(--gd)}.mn{background:#efe3ff;color:#3d2466;border-radius:14px;padding:12px;margin-top:10px;font-size:15px}.mr{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:2px solid var(--bd);font-size:15px}.mr span:last-child{color:var(--mut);white-space:nowrap}
-</style></head><body><div id="app"></div>
+.toast{position:fixed;left:12px;right:12px;bottom:calc(16px + env(safe-area-inset-bottom,0px));max-width:536px;margin:0 auto;background:var(--tx);color:var(--bg);border-radius:14px;padding:12px 16px;font-size:15px;z-index:20;display:none}.toast.on{display:block}
+</style></head><body><div id="app"></div><div class="toast" id="toast" role="status" aria-live="polite"></div><audio id="au" preload="none" playsinline></audio>
 <script>
 const D=[
 {ru:"Меня зовут Азиз.",tr:"Menya zovut Aziz.",uz:"Mening ismim Aziz.",w:"Yangi odam bilan tanishayotganda o‘zingizni tanishtirasiz. “Азиз” o‘rniga o‘z ismingizni qo‘yasiz.",s:"Yangi hamkasb bilan tanishyapsiz. O‘zingizni tanishtiring."},
@@ -67,8 +68,88 @@ const D=[
 const U=[{n:"Tanishuv",e:"👋",k:[0,1,2]},{n:"Qayerdansiz?",e:"🌍",k:[3,4,5]},{n:"Tushunmasam…",e:"🐢",k:[6,7,8]},{n:"Rahmat!",e:"🙏",k:[9,10]},{n:"Mega test",e:"🏆",k:D.map((_,i)=>i)},{n:"Suhbat",e:"🗣",k:[]}];
 const $=s=>document.querySelector(s),sh=a=>[...a].sort(()=>Math.random()-.5);
 let xp=0,sk=0,un=0,dn=new Set(),L=null;
-function snd(f,d=.15){try{const c=new(window.AudioContext||window.webkitAudioContext)(),o=c.createOscillator(),g=c.createGain();o.frequency.value=f;o.type="triangle";g.gain.value=.15;o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+d)}catch(e){}}
-function say(k){try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(D[k].ru);u.lang="ru-RU";u.rate=.8;speechSynthesis.speak(u)}catch(e){}}
+
+/* ---------- Xabar (xatolar jim qolmasin) ---------- */
+let tt;
+const note=(m,ms=4500)=>{const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(tt);tt=setTimeout(()=>t.classList.remove("on"),ms)};
+const err=(m,e)=>{console.error(m,e||"");note("⚠️ "+m)};
+
+/* ---------- Ovoz tizimi ---------- */
+const AU=$("#au");
+let ac=null,voice=null,tmr=null,UT=null,gErr=0;
+const SIL="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+// Bitta umumiy AudioContext, har safar qayta yoqiladi
+function snd(f,d=.15){
+  try{
+    if(!ac)ac=new(window.AudioContext||window.webkitAudioContext)();
+    if(ac.state!=="running")ac.resume();
+    const o=ac.createOscillator(),g=ac.createGain();
+    o.frequency.value=f;o.type="triangle";g.gain.value=.15;
+    o.connect(g);g.connect(ac.destination);
+    o.start();o.stop(ac.currentTime+d);
+    o.onended=()=>{try{o.disconnect();g.disconnect()}catch(e){}};
+  }catch(e){err("Pik tovushi ishlamadi: "+e.message,e)}
+}
+const pickVoice=()=>{
+  if(!("speechSynthesis"in window))return null;
+  const vs=speechSynthesis.getVoices().filter(v=>/^ru/i.test((v.lang||"").replace("_","-")));
+  return vs.find(v=>v.localService)||vs[0]||null;
+};
+// Ovozlar ro'yxati kech yuklanadi, shuning uchun kutamiz (3 soniyagacha)
+const loadVoices=()=>new Promise(res=>{
+  if(!("speechSynthesis"in window))return res(null);
+  voice=pickVoice();if(voice)return res(voice);
+  let n=0;
+  speechSynthesis.onvoiceschanged=()=>{voice=pickVoice();if(voice){clearInterval(iv);res(voice)}};
+  const iv=setInterval(()=>{voice=pickVoice();if(voice||++n>15){clearInterval(iv);res(voice)}},200);
+});
+// Google ovozi (rus ovozi telefonda bo'lmasa, internet kerak)
+function gsay(txt,r){
+  try{
+    AU.pause();
+    AU.src="https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=ru&q="+encodeURIComponent(txt);
+    AU.playbackRate=r<.7?.7:1;
+    const p=AU.play();
+    if(p&&p.catch)p.catch(e=>{if(Date.now()-gErr>4000){gErr=Date.now();err("Rus ovozi chiqmadi. Internetni va media ovozini tekshiring.",e)}});
+  }catch(e){err("Google ovozi ishlamadi: "+e.message,e)}
+}
+function speak(txt,r=.85){
+  if(!voice){gsay(txt,r);return}
+  try{
+    clearTimeout(tmr);AU.pause();
+    speechSynthesis.cancel();
+    UT=new SpeechSynthesisUtterance(txt); // global o'zgaruvchida saqlanadi, Chrome o'chirib yubormasin
+    UT.voice=voice;UT.lang=voice.lang;UT.rate=r;
+    UT.onerror=e=>{if(e.error==="canceled"||e.error==="interrupted")return;err("Ovoz xatosi ("+e.error+"), Google ovoziga o‘tildi.");voice=null;gsay(txt,r)};
+    // cancel() dan keyin darrov speak() Chrome'da gapni tushirib yuboradi
+    tmr=setTimeout(()=>{try{speechSynthesis.resume();speechSynthesis.speak(UT)}catch(e){err("Ovoz xatosi: "+e.message,e)}},90);
+  }catch(e){err("Ovoz xatosi: "+e.message,e);voice=null;gsay(txt,r)}
+}
+const say=k=>speak(D[k].ru,.8);
+const sayT=t=>speak(t,.85);
+// "Boshlash" bosilganda chaqiriladi: brauzer ovozni ochadi
+async function initAudio(){
+  try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();await ac.resume()}catch(e){err("AudioContext ochilmadi: "+e.message,e)}
+  snd(660,.08);
+  try{if("speechSynthesis"in window){const u=new SpeechSynthesisUtterance(" ");u.volume=0;speechSynthesis.speak(u)}}catch(e){}
+  try{AU.src=SIL;const p=AU.play();if(p&&p.catch)await p.catch(()=>{})}catch(e){}
+  await loadVoices();
+}
+
+/* ---------- Boshlash ekrani ---------- */
+function splash(){
+  $("#app").innerHTML=`<div class="end"><div class="e">🦉</div><h1 style="color:var(--g)">Rus tili o‘yini</h1><p id="stt" style="padding:0 24px">Ovoz bilan o‘rganish uchun “Boshlash” tugmasini bosing.</p><div class="bd"><button class="btn" id="go0">Boshlash</button></div></div>`;
+  const b=$("#go0");
+  b.onclick=async()=>{
+    b.disabled=true;b.textContent="Ovoz yuklanmoqda…";
+    $("#stt").textContent="Rus ovozi qidirilmoqda…";
+    await initAudio();
+    if(voice)note("✔ Rus ovozi tayyor: "+voice.name,3000);
+    else note("Telefonda rus ovozi yo‘q. Google ovoziga o‘tildi, internet kerak.",6000);
+    home();
+  };
+}
+
 function home(){L=null;DL=null;R=null;$("#app").innerHTML=`<div class="hd"><span class="y">🔥 ${sk}</span><span class="p">⭐ ${xp} XP</span><span class="h">❤️ 3</span></div>
 <button class="rv" onclick="rev()">🧠 <b>Takrorlash</b><br><small>${dueL().length?dueL().length+" ta jumla takrorlashni kutyapti!":Object.keys(cd).length?"Hozircha hammasi esda. Mustahkamlash uchun bosing":"1-darsni tugatgach shu yerda ochiladi"}</small></button><div class="unit"><small>1-BO‘LIM</small><h2>Rus tilida birinchi gaplar</h2></div><div class="path">${U.map((u,i)=>{const st=dn.has(i)?"done":i<=un?"cur":"lock",off=[0,50,-45,40,0,-30][i];return`<div style="transform:translateX(${off}px);text-align:center"><button class="nd ${st}" ${st=="lock"?"":`onclick="start(${i})"`}>${st=="cur"?'<span class="s">BOSHLASH</span>':''}${dn.has(i)?"⭐":u.e}</button><div class="lb">${u.n}</div></div>`}).join("")}</div>`}
 function mk(u){let q=[],ex=[];if(u<4){U[u].k.forEach(k=>q.push({t:"teach",k},{t:"say",k}));U[u].k.forEach(k=>ex.push({t:"mc",k},{t:"build",k},{t:"sit",k}));q=q.concat(sh(ex))}else{D.forEach((_,k)=>{ex.push({t:["mc","build","sit"][k%3],k});if(k%2)ex.push({t:"say",k})});q=sh(ex)}return q}
@@ -97,12 +178,11 @@ $("#app").innerHTML=`${c}<div class="end"><div class="e">🏆</div><h1>Dars tuga
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 const nm=s=>s.toLowerCase().replace(/ё/g,"е").replace(/[^а-яa-z0-9\s]/g," ").split(/\s+/).filter(Boolean);
 const sim=(a,b)=>{a=nm(a);b=nm(b);return b.filter(w=>a.includes(w)).length/b.length};
-function sayT(t){try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang="ru-RU";u.rate=.85;speechSynthesis.speak(u)}catch(e){}}
 function mic(k){const m=$("#mg");if(!SR){m.textContent="Brauzer ovoz tanishni qo‘llamaydi (Chrome’da sinab ko‘ring). “O‘tkazib yuborish”ni bosing.";return}
 m.textContent="🎤 Eshityapman… ruscha ayting";let dn_=0;const r=new SR();r.lang="ru-RU";r.maxAlternatives=3;
 r.onresult=e=>{dn_=1;let best=0,tx="";for(const a of e.results[0]){const s=sim(a.transcript,D[k].ru);if(s>=best){best=s;tx=a.transcript}}if(best>=.6)good(tx);else m.innerHTML=`Eshitildi: “${tx}”<br>Yana urinib ko‘ring 🔁`};
 r.onerror=e=>{dn_=1;m.textContent=e.error=="not-allowed"?"Mikrofonga ruxsat berilmagan. “O‘tkazib yuborish”ni bosing.":"Eshitilmadi, yana bosing."};
-r.onend=()=>{if(!dn_)m.textContent="Ovoz eshitilmadi, yana bosing."};try{r.start()}catch(e){}}
+r.onend=()=>{if(!dn_)m.textContent="Ovoz eshitilmadi, yana bosing."};try{r.start()}catch(e){err("Mikrofon ishga tushmadi: "+e.message,e)}}
 function good(tx){snd(660);snd(880,.2);if(R){$("#mg").innerHTML="✅ To‘g‘ri aytdingiz! “"+tx+"”";return}if(DL){dX+=10;$("#mg").innerHTML="✅ Ofarin!";setTimeout(nD,800)}else{L.xp+=10;L.st="ok";L.heard=tx;draw()}}
 let DL=null,dX=0;
 const DS=[{n:"Tanishuv",ts:[["Здравствуйте! Меня зовут Анна.","Assalomu alaykum! Mening ismim Anna.",1],["Как вас зовут?","Ismingiz nima?",0],["Где вы живёте?","Qayerda yashaysiz?",2],["А я живу в Самарканде.","Men esa Samarqandda yashayman.",3]]},
@@ -146,5 +226,6 @@ $("#app").innerHTML=`<div class="top"><button class="x" onclick="home()">✕</bu
 function gr(k,g){const c=cd[k];if(g==0){c.st=1;c.due=Date.now()+864e5;R.q.push(k)}else if(!R.pr){if(g==2){c.st=Math.min(5,c.st+1);R.ok++;R.xp+=5}c.due=Date.now()+IV[c.st]*864e5}else if(g==2)R.ok++;R.i++;R.show=0;sv();drR()}
 function fR(){xp+=R.xp;sk++;sv();snd(523);setTimeout(()=>snd(784,.3),150);
 $("#app").innerHTML=`<div class="end"><div class="e">🧠</div><h1>Takrorlash tugadi!</h1><div class="stat"><div style="color:#ce82ff">⭐ +${R.xp} XP</div><div style="color:var(--g)">✅ ${R.ok}/${R.tot}</div></div><div class="bd" style="text-align:left"><b>🧠 Xotira kartangiz</b>${Object.keys(cd).map(Number).map(k=>`<div class="mr"><span>${D[k].uz}<br><span style="font-size:13px">${"▰".repeat(cd[k].st)+"▱".repeat(5-cd[k].st)}</span></span><span>${lbl(cd[k])}</span></div>`).join("")}<br><button class="btn" onclick="home()">Davom etish</button></div></div>`}
-ld();home();
+window.addEventListener("error",e=>err("Xato: "+e.message));
+ld();splash();
 </script></body></html>
